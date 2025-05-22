@@ -3,11 +3,16 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import ttk, messagebox, font
 
-sys.path.append("./")
+# Use an absolute path and check before appending sys.path
+import os
+sys_path = os.path.abspath("./")
+if sys_path not in sys.path:
+    sys.path.append(sys_path)
 from src.conf.models import ClientRecord, AirlineRecord, FlightRecord
 
 
 def create_tab_buttons(parent, add_cmd, edit_cmd, del_cmd, exit_cmd=None):
+    """Creates tab-level buttons for CRUD operations."""
     f = ttk.Frame(parent)
     f.pack(fill="x", pady=4, padx=8, anchor="w")
     ttk.Button(f, text="Add", command=add_cmd).pack(side="left", padx=4)
@@ -51,6 +56,8 @@ def create_flight_table(parent):
 
 
 class TravelAgentGUI:
+    """Main application GUI for managing clients, airlines, and flights."""
+
     def __init__(self, record_manager, storage_manager):
         self.search_tab_update_results_table = None
         self.search_results_table = None
@@ -64,7 +71,10 @@ class TravelAgentGUI:
         self.client_tab = None
         self.record_manager = record_manager
         self.storage_manager = storage_manager
-        self.record_manager.records = self.storage_manager.load_records()
+
+        # Loading records as dict of lists
+        records = self.storage_manager.load_records()
+        self.record_manager.set_records(records)
 
         self.root = tk.Tk()
         self.root.title("Travel Agent Record Management System")
@@ -74,7 +84,6 @@ class TravelAgentGUI:
         self.create_tabs()
         self.create_menu()
         self.refresh_all_tables()
-
         exit_font = font.Font(family="Arial", size=14, weight="bold")
         exit_button = tk.Button(
             self.root,
@@ -86,6 +95,7 @@ class TravelAgentGUI:
         )
         exit_button.pack(pady=10, anchor="ne")
         self.root.protocol("WM_DELETE_WINDOW", self.exit_application)
+
 
     def set_theme(self):
         style = ttk.Style(self.root)
@@ -121,7 +131,7 @@ class TravelAgentGUI:
             current_tab = event.widget.select()
             tab_text = event.widget.tab(current_tab, "text")
             if tab_text.lower() == "search":
-                if hasattr(self, "search_tab_update_results_table"):
+                if hasattr(self, "search_tab_update_results_table") and self.search_tab_update_results_table:
                     self.search_tab_update_results_table()
         self.tabs.bind("<<NotebookTabChanged>>", on_tab_changed)
 
@@ -194,16 +204,7 @@ class TravelAgentGUI:
             current_type = type_var.get()
             selected_field = field_var.get()
             search_v = entry_value.get().strip().lower()
-            for record in self.record_manager.records:
-                is_type = False
-                if current_type == "client" and record.get("type") == "client":
-                    is_type = True
-                elif current_type == "airline" and record.get("type") == "airline":
-                    is_type = True
-                elif current_type == "flight" and "flight_date" in record:
-                    is_type = True
-                if not is_type:
-                    continue
+            for record in self.record_manager.display_records(current_type):
                 rec_val = str(record.get(selected_field, "")).lower()
                 if search_v and search_v not in rec_val:
                     continue
@@ -212,19 +213,21 @@ class TravelAgentGUI:
             if not table_rows:
                 messagebox.showinfo("No Results", "No records match your search.", parent=self.root)
         btn_search.config(command=do_search)
-        # Allow pressing <Return> in entry triggers search
         entry_value.bind("<Return>", lambda e: do_search())
 
     def create_menu(self):
         menubar = tk.Menu(self.root)
         filemenu = tk.Menu(menubar, tearoff=0)
-        filemenu.add_command(label="Save", command=lambda: self.storage_manager.save_records(self.record_manager.records), accelerator="Cmd+S")
+        filemenu.add_command(label="Save", command=self.save_all_records, accelerator="Cmd+S")
         filemenu.add_separator()
         filemenu.add_command(label="Exit", command=self.exit_application, accelerator="Cmd+Q")
         menubar.add_cascade(label="File", menu=filemenu)
         self.root.config(menu=menubar)
-        self.root.bind("<Command-s>", lambda e: self.storage_manager.save_records(self.record_manager.records))
+        self.root.bind("<Command-s>", lambda e: self.save_all_records())
         self.root.bind("<Command-q>", lambda e: self.exit_application())
+
+    def save_all_records(self):
+        self.storage_manager.save_records(self.record_manager.records)
 
     # --------- Client CRUD ---------
     def add_client(self):
@@ -233,7 +236,7 @@ class TravelAgentGUI:
     def edit_selected_client(self):
         sel = self.client_table.selection()
         if not sel:
-            messagebox.showinfo("Edit Client", "Please select a client to edit.")
+            messagebox.showinfo("Edit Client", "Please select a client to edit.", parent=self.root)
             return
         values = self.client_table.item(sel[0], "values")
         self.show_client_form(initial=values)
@@ -241,13 +244,18 @@ class TravelAgentGUI:
     def delete_selected_client(self):
         sel = self.client_table.selection()
         if not sel:
-            messagebox.showinfo("Delete Client", "Please select a client to delete.")
+            messagebox.showinfo("Delete Client", "Please select a client to delete.", parent=self.root)
             return
         values = self.client_table.item(sel[0], "values")
-        client_id = int(values[0])
+        try:
+            client_id = int(values[0])
+        except (ValueError, IndexError):
+            messagebox.showerror("Error", "Invalid client selection.", parent=self.root)
+            return
         answer = messagebox.askyesno("Confirm Delete", f"Delete client with ID={client_id} ({values[1]})?", parent=self.root)
         if answer:
-            self.record_manager.delete_record(client_id)
+            self.record_manager.delete_record("client", client_id)
+            self.save_all_records()
             self.refresh_all_tables()
             self.root.focus_force()
 
@@ -281,8 +289,10 @@ class TravelAgentGUI:
         def validate_fields():
             for label, typ in fields:
                 val = entries[label].get().strip()
-                if not val: return False
-                if typ is int and not val.isdigit(): return False
+                if not val:
+                    return False
+                if typ is int and not val.isdigit():
+                    return False
             return True
 
         def on_submit(event=None):
@@ -299,6 +309,7 @@ class TravelAgentGUI:
                     self.record_manager.update_record(int(vals[0]), obj.to_dict())
                 else:
                     self.record_manager.create_record(obj)
+                self.storage_manager.save_records(self.record_manager.records)
                 self.refresh_all_tables()
                 form.destroy()
                 self.root.focus_force()
@@ -320,7 +331,7 @@ class TravelAgentGUI:
     def edit_selected_airline(self):
         sel = self.airline_table.selection()
         if not sel:
-            messagebox.showinfo("Edit Airline", "Please select an airline to edit.")
+            messagebox.showinfo("Edit Airline", "Please select an airline to edit.", parent=self.root)
             return
         values = self.airline_table.item(sel[0], "values")
         self.show_airline_form(initial=values)
@@ -328,21 +339,26 @@ class TravelAgentGUI:
     def delete_selected_airline(self):
         sel = self.airline_table.selection()
         if not sel:
-            messagebox.showinfo("Delete Airline", "Please select an airline to delete.")
+            messagebox.showinfo("Delete Airline", "Please select an airline to delete.", parent=self.root)
             return
         values = self.airline_table.item(sel[0], "values")
-        airline_id = int(values[0])
+        try:
+            airline_id = int(values[0])
+        except (ValueError, IndexError):
+            messagebox.showerror("Error", "Invalid airline selection.", parent=self.root)
+            return
         company_name = values[1]
         answer = messagebox.askyesno("Confirm Delete", f"Delete airline ID={airline_id} ({company_name})?", parent=self.root)
         if answer:
-            self.record_manager.delete_record(airline_id)
+            self.record_manager.delete_record("airline", airline_id)
+            self.save_all_records()
             self.refresh_all_tables()
             self.root.focus_force()
+
 
     def show_airline_form(self, initial=None):
         form = tk.Toplevel(self.root)
         form.title("Add Airline" if initial is None else "Edit Airline")
-
         fields = [
             ("ID", int),
             ("Company Name", str)
@@ -361,8 +377,10 @@ class TravelAgentGUI:
         def validate_fields():
             for label, typ in fields:
                 val = entries[label].get().strip()
-                if not val: return False
-                if typ is int and not val.isdigit(): return False
+                if not val:
+                    return False
+                if typ is int and not val.isdigit():
+                    return False
             return True
 
         def on_submit(event=None):
@@ -372,9 +390,10 @@ class TravelAgentGUI:
             try:
                 airline = AirlineRecord(int(entries["ID"].get()), entries["Company Name"].get().strip())
                 if initial:
-                    self.record_manager.update_record(airline.id, airline.to_dict())
+                    self.record_manager.update_record("airline", airline.id, airline.to_dict())
                 else:
                     self.record_manager.create_record(airline)
+                self.save_all_records()
                 self.refresh_all_tables()
                 form.destroy()
                 self.root.focus_force()
@@ -389,14 +408,14 @@ class TravelAgentGUI:
         form.grab_set()
         self.center_toplevel(form)
 
-    # --------- Flight CRUD ---------
+   # --------- Flight CRUD ---------
     def add_flight(self):
         self.show_flight_form()
 
     def edit_selected_flight(self):
         sel = self.flight_table.selection()
         if not sel:
-            messagebox.showinfo("Edit Flight", "Please select a flight to edit.")
+            messagebox.showinfo("Edit Flight", "Please select a flight to edit.", parent=self.root)
             return
         values = self.flight_table.item(sel[0], "values")
         self.show_flight_form(initial=values)
@@ -404,7 +423,7 @@ class TravelAgentGUI:
     def delete_selected_flight(self):
         sel = self.flight_table.selection()
         if not sel:
-            messagebox.showinfo("Delete Flight", "Please select a flight to delete.")
+            messagebox.showinfo("Delete Flight", "Please select a flight to delete.", parent=self.root)
             return
         row = self.flight_table.item(sel[0], "values")
         msg = (
@@ -413,17 +432,15 @@ class TravelAgentGUI:
         )
         answer = messagebox.askyesno("Confirm Delete", msg, parent=self.root)
         if answer:
-            found_index = None
-            for idx, record in enumerate(self.record_manager.records):
-                if (record.get("client_id") == int(row[0]) and
-                        record.get("airline_id") == int(row[1]) and
-                        str(record.get("flight_date")) == str(row[2]) and
-                        record.get("start_city") == row[3] and
-                        record.get("end_city") == row[4]):
-                    found_index = idx
-                    break
-            if found_index is not None:
-                del self.record_manager.records[found_index]
+            composite = {
+                "client_id": int(row[0]),
+                "airline_id": int(row[1]),
+                "flight_date": row[2],
+                "start_city": row[3],
+                "end_city": row[4]
+            }
+            self.record_manager.delete_record("flight", composite)
+            self.save_all_records()
             self.refresh_all_tables()
             self.root.focus_force()
 
@@ -458,7 +475,8 @@ class TravelAgentGUI:
                 datetime.strptime(_dt, "%Y-%m-%d")
                 if not entries["Start City"].get().strip() or not entries["End City"].get().strip(): return False
                 return True
-            except: return False
+            except Exception:
+                return False
 
         def on_submit(event=None):
             if not validate_fields():
@@ -473,16 +491,17 @@ class TravelAgentGUI:
                 flight = FlightRecord(client_id, airline_id, flight_date, start_city, end_city)
                 flight_dict = flight.to_dict()
                 if initial:
-                    for idx, record in enumerate(self.record_manager.records):
-                        if (record.get("client_id") == int(initial[0]) and
-                                record.get("airline_id") == int(initial[1]) and
-                                str(record.get("flight_date")) == str(initial[2]) and
-                                record.get("start_city") == initial[3] and
-                                record.get("end_city") == initial[4]):
-                            self.record_manager.records[idx] = flight_dict
-                            break
+                    composite = {
+                        "client_id": int(initial[0]),
+                        "airline_id": int(initial[1]),
+                        "flight_date": initial[2],
+                        "start_city": initial[3],
+                        "end_city": initial[4],
+                    }
+                    self.record_manager.update_record("flight", composite, flight_dict)
                 else:
                     self.record_manager.create_record(flight)
+                self.save_all_records()
                 self.refresh_all_tables()
                 form.destroy()
                 self.root.focus_force()
@@ -506,34 +525,37 @@ class TravelAgentGUI:
     def refresh_table(self, table, type_name):
         for item in table.get_children():
             table.delete(item)
-        for record in self.record_manager.records:
-            if type_name == "client" and record.get("type") == "client":
+        records = self.record_manager.display_records(type_name)
+        for record in records:
+            if type_name == "client":
                 table.insert(
                     "", "end",
-                    values=(record.get("id"), record.get("name"), record.get("address_line1"), record.get("address_line2"),
-                            record.get("address_line3"), record.get("city"), record.get("state"),
-                            record.get("zip_code"), record.get("country"), record.get("phone_number")))
-            elif type_name == "airline" and record.get("type") == "airline":
+                    values=(record.get("id"), record.get("name"), record.get("address_line1"),
+                            record.get("address_line2"), record.get("address_line3"), record.get("city"),
+                            record.get("state"), record.get("zip_code"), record.get("country"),
+                            record.get("phone_number")))
+            elif type_name == "airline":
                 table.insert(
                     "", "end",
                     values=(record.get("id"), record.get("company_name")))
-            elif type_name == "flight" and "flight_date" in record:
+            elif type_name == "flight":
                 table.insert(
                     "", "end",
-                    values=(record.get("client_id"),
-                            record.get("airline_id"),
-                            record.get("flight_date"),
-                            record.get("start_city"),
-                            record.get("end_city")))
+                    values=(record.get("client_id"), record.get("airline_id"), record.get("flight_date"),
+                            record.get("start_city"), record.get("end_city")))
+
+            # Optionally, else: log or handle unexpected types if needed
 
     def exit_application(self):
-        self.storage_manager.save_records(self.record_manager.records)
+        self.save_all_records()
         self.root.destroy()
 
     def run(self):
+        """Starts the GUI event loop."""
         self.root.mainloop()
 
     def center_toplevel(self, toplevel):
+        """Centers a toplevel window on the screen."""
         toplevel.update_idletasks()
         w = toplevel.winfo_width()
         h = toplevel.winfo_height()

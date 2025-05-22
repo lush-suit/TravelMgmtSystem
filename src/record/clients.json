@@ -1,0 +1,15 @@
+[
+    {
+        "id": 1,
+        "type": "client",
+        "name": "Israel Osas",
+        "address_line1": "32, Eastbournia Avenue,",
+        "address_line2": "Edmonton",
+        "address_line3": "Enfield",
+        "city": "London",
+        "state": "London",
+        "zip_code": "N9",
+        "country": "United Kingdom",
+        "phone_number": "07399172110"
+    }
+]
