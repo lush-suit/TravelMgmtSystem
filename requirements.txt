@@ -1,1 +1,3 @@
-jsonlines
+# All dependencies are part of the Python standard library.
+# For GUI functionality, ensure 'tkinter' is available with your Python installation.
+# On some systems, you may need to install it separately.
