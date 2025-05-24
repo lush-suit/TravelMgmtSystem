@@ -2,7 +2,7 @@
     {
         "client_id": 1,
         "airline_id": 1,
-        "flight_date": "2025-05-24",
+        "flight_date": "2025-05-28",
         "start_city": "London",
         "end_city": "New York"
     }

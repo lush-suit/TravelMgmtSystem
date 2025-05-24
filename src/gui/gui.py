@@ -306,7 +306,7 @@ class TravelAgentGUI:
                     vals[7], vals[8], vals[9]
                 )
                 if initial:
-                    self.record_manager.update_record(int(vals[0]), obj.to_dict())
+                    self.record_manager.update_record("client", int(vals[0]), obj.to_dict())
                 else:
                     self.record_manager.create_record(obj)
                 self.storage_manager.save_records(self.record_manager.records)
